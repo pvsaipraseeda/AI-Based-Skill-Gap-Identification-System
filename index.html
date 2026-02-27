@@ -1,0 +1,1098 @@
+"""
+AI-Based Skill Gap Identification System
+=========================================
+Run with: streamlit run app.py
+
+Requirements:
+    pip install streamlit pandas numpy scikit-learn pillow pytesseract PyMuPDF python-docx bcrypt plotly
+    # For OCR support: sudo apt-get install tesseract-ocr
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import json
+import re
+import hashlib
+import os
+import time
+from datetime import datetime
+from io import BytesIO
+import base64
+
+# ─── PAGE CONFIG ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="SkillBridge AI",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ─── CUSTOM CSS ───────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap');
+
+:root {
+    --primary: #6C63FF;
+    --secondary: #FF6584;
+    --accent: #43E97B;
+    --dark: #0F0F1A;
+    --card: #1A1A2E;
+    --card2: #16213E;
+    --text: #E8E8F0;
+    --muted: #8888AA;
+    --border: rgba(108,99,255,0.25);
+}
+
+* { font-family: 'Space Grotesk', sans-serif; }
+
+html, body, [class*="css"] {
+    background-color: var(--dark) !important;
+    color: var(--text) !important;
+}
+
+/* Hide Streamlit branding */
+#MainMenu, footer, header { visibility: hidden; }
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: var(--card2) !important;
+    border-right: 1px solid var(--border) !important;
+}
+
+/* Custom header */
+.hero-header {
+    background: linear-gradient(135deg, #6C63FF 0%, #FF6584 50%, #43E97B 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-family: 'Syne', sans-serif;
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin: 0;
+}
+
+.hero-sub {
+    color: var(--muted);
+    font-size: 1.1rem;
+    margin-top: 0.5rem;
+}
+
+/* Cards */
+.skill-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin: 8px 0;
+    transition: transform 0.2s, border-color 0.2s;
+}
+.skill-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+}
+
+.gap-card {
+    background: linear-gradient(135deg, rgba(255,101,132,0.1), rgba(108,99,255,0.1));
+    border: 1px solid rgba(255,101,132,0.3);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin: 8px 0;
+}
+
+.match-card {
+    background: linear-gradient(135deg, rgba(67,233,123,0.1), rgba(108,99,255,0.1));
+    border: 1px solid rgba(67,233,123,0.3);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin: 8px 0;
+}
+
+/* Tags */
+.skill-tag {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin: 3px;
+}
+.tag-have { background: rgba(67,233,123,0.15); color: #43E97B; border: 1px solid rgba(67,233,123,0.3); }
+.tag-missing { background: rgba(255,101,132,0.15); color: #FF6584; border: 1px solid rgba(255,101,132,0.3); }
+.tag-neutral { background: rgba(108,99,255,0.15); color: #6C63FF; border: 1px solid rgba(108,99,255,0.3); }
+
+/* Progress bar */
+.prog-bar-wrap {
+    background: rgba(255,255,255,0.05);
+    border-radius: 20px;
+    height: 10px;
+    overflow: hidden;
+    margin: 8px 0;
+}
+.prog-bar-fill {
+    height: 100%;
+    border-radius: 20px;
+    background: linear-gradient(90deg, #6C63FF, #43E97B);
+    transition: width 0.8s ease;
+}
+
+/* Login / Signup box */
+.auth-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 40px;
+    max-width: 440px;
+    margin: 0 auto;
+}
+
+/* Stat boxes */
+.stat-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+}
+.stat-number {
+    font-family: 'Syne', sans-serif;
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #6C63FF, #43E97B);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.stat-label { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+
+/* Section headers */
+.section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 24px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Recommendation cards */
+.rec-card {
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin: 10px 0;
+    border-left: 4px solid var(--primary);
+}
+.rec-title { font-weight: 600; font-size: 1rem; color: var(--text); }
+.rec-meta { color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
+.rec-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 8px;
+}
+.badge-free { background: rgba(67,233,123,0.15); color: #43E97B; }
+.badge-paid { background: rgba(255,101,132,0.15); color: #FF6584; }
+.badge-cert { background: rgba(108,99,255,0.15); color: #6C63FF; }
+
+/* Stagger animations */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.animate { animation: fadeInUp 0.5s ease forwards; }
+
+/* Input overrides */
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] select {
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid var(--border) !important;
+    color: var(--text) !important;
+    border-radius: 10px !important;
+}
+
+/* Buttons */
+[data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #6C63FF, #FF6584) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 600 !important;
+    padding: 0.6rem 2rem !important;
+}
+
+/* Tabs */
+[data-baseweb="tab-list"] {
+    background: var(--card) !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    gap: 4px !important;
+}
+[data-baseweb="tab"] {
+    border-radius: 8px !important;
+    color: var(--muted) !important;
+}
+[aria-selected="true"] {
+    background: var(--primary) !important;
+    color: white !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploadDropzone"] {
+    background: rgba(108,99,255,0.05) !important;
+    border: 2px dashed var(--border) !important;
+    border-radius: 16px !important;
+}
+
+/* Divider */
+hr { border-color: var(--border) !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── USER DATABASE (in-memory, JSON-backed) ───────────────────────────────────
+USERS_FILE = "users_db.json"
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def authenticate(username, password):
+    users = load_users()
+    if username in users and users[username]["password"] == hash_password(password):
+        return True
+    return False
+
+def register_user(username, password, email, name):
+    users = load_users()
+    if username in users:
+        return False, "Username already exists."
+    users[username] = {
+        "password": hash_password(password),
+        "email": email,
+        "name": name,
+        "created": datetime.now().isoformat(),
+        "analyses": []
+    }
+    save_users(users)
+    return True, "Account created!"
+
+# ─── SKILLS DATABASE ──────────────────────────────────────────────────────────
+SKILLS_DB = {
+    "Python": ["programming", "scripting", "automation", "data science", "machine learning", "backend"],
+    "JavaScript": ["web", "frontend", "react", "node", "typescript", "fullstack"],
+    "React": ["frontend", "web", "ui", "component", "spa"],
+    "Node.js": ["backend", "server", "api", "javascript", "fullstack"],
+    "SQL": ["database", "query", "mysql", "postgresql", "data"],
+    "Machine Learning": ["ml", "ai", "sklearn", "tensorflow", "pytorch", "deep learning"],
+    "Deep Learning": ["neural", "tensorflow", "pytorch", "keras", "cnn", "rnn", "transformer"],
+    "NLP": ["natural language", "text", "bert", "transformers", "nlp", "sentiment"],
+    "Data Analysis": ["pandas", "numpy", "visualization", "statistics", "analytics"],
+    "Docker": ["containerization", "devops", "deployment", "kubernetes"],
+    "Kubernetes": ["orchestration", "devops", "cloud", "container"],
+    "AWS": ["cloud", "amazon", "s3", "ec2", "lambda", "serverless"],
+    "Azure": ["cloud", "microsoft", "devops"],
+    "Git": ["version control", "github", "gitlab", "collaboration"],
+    "REST API": ["api", "web services", "http", "backend", "integration"],
+    "GraphQL": ["api", "query language", "backend", "facebook"],
+    "TypeScript": ["javascript", "typing", "frontend", "angular"],
+    "Java": ["oop", "backend", "spring", "enterprise"],
+    "C++": ["systems", "game dev", "performance", "embedded"],
+    "Rust": ["systems", "performance", "memory safe"],
+    "Go": ["golang", "backend", "microservices", "performance"],
+    "DevOps": ["ci/cd", "deployment", "automation", "pipeline"],
+    "Agile": ["scrum", "kanban", "project management", "sprint"],
+    "Communication": ["presentation", "writing", "teamwork", "stakeholder"],
+    "Leadership": ["management", "team lead", "mentoring", "strategy"],
+    "Problem Solving": ["analytical", "critical thinking", "debugging", "algorithm"],
+    "Statistics": ["probability", "data science", "machine learning", "analytics"],
+    "Computer Vision": ["opencv", "image processing", "cnn", "object detection"],
+    "Tableau": ["visualization", "bi", "dashboard", "analytics"],
+    "Power BI": ["visualization", "microsoft", "bi", "dashboard"],
+}
+
+JOB_ROLES = {
+    "Data Scientist": {
+        "required": ["Python", "Machine Learning", "Statistics", "SQL", "Data Analysis", "Deep Learning"],
+        "nice_to_have": ["NLP", "Computer Vision", "Tableau", "AWS", "Docker"],
+        "description": "Analyze complex datasets and build predictive models to drive business decisions.",
+        "avg_salary": "$105,000 – $145,000",
+        "demand": "Very High",
+    },
+    "ML Engineer": {
+        "required": ["Python", "Machine Learning", "Deep Learning", "Docker", "AWS"],
+        "nice_to_have": ["Kubernetes", "Rust", "Go", "NLP", "Computer Vision"],
+        "description": "Design and deploy machine learning systems at scale in production environments.",
+        "avg_salary": "$120,000 – $165,000",
+        "demand": "Extremely High",
+    },
+    "Frontend Developer": {
+        "required": ["JavaScript", "React", "TypeScript", "Git", "REST API"],
+        "nice_to_have": ["GraphQL", "Docker", "AWS", "Node.js"],
+        "description": "Build beautiful, performant user interfaces using modern web technologies.",
+        "avg_salary": "$85,000 – $130,000",
+        "demand": "High",
+    },
+    "Backend Developer": {
+        "required": ["Python", "SQL", "REST API", "Git", "Docker"],
+        "nice_to_have": ["Go", "Kubernetes", "AWS", "GraphQL", "Node.js"],
+        "description": "Design and implement server-side architecture and APIs.",
+        "avg_salary": "$95,000 – $140,000",
+        "demand": "High",
+    },
+    "Full Stack Developer": {
+        "required": ["JavaScript", "React", "Node.js", "SQL", "Git", "REST API"],
+        "nice_to_have": ["TypeScript", "Docker", "AWS", "GraphQL"],
+        "description": "Build complete web applications from database to user interface.",
+        "avg_salary": "$95,000 – $145,000",
+        "demand": "Very High",
+    },
+    "DevOps Engineer": {
+        "required": ["Docker", "Kubernetes", "AWS", "Git", "DevOps"],
+        "nice_to_have": ["Python", "Go", "Azure", "Terraform"],
+        "description": "Bridge development and operations to enable fast, reliable software delivery.",
+        "avg_salary": "$110,000 – $155,000",
+        "demand": "Very High",
+    },
+    "NLP Engineer": {
+        "required": ["Python", "NLP", "Deep Learning", "Machine Learning", "Statistics"],
+        "nice_to_have": ["AWS", "Docker", "REST API", "Data Analysis"],
+        "description": "Build systems that understand and generate human language.",
+        "avg_salary": "$115,000 – $160,000",
+        "demand": "Extremely High",
+    },
+    "Data Analyst": {
+        "required": ["SQL", "Data Analysis", "Statistics", "Tableau", "Python"],
+        "nice_to_have": ["Power BI", "Machine Learning", "Communication"],
+        "description": "Transform data into actionable business insights and reports.",
+        "avg_salary": "$65,000 – $95,000",
+        "demand": "High",
+    },
+}
+
+TRAINING_RESOURCES = {
+    "Python": [
+        {"title": "Python for Everybody", "provider": "Coursera (Michigan)", "type": "free", "url": "https://coursera.org/specializations/python", "duration": "8 weeks"},
+        {"title": "Automate the Boring Stuff", "provider": "Al Sweigart (Book)", "type": "free", "url": "https://automatetheboringstuff.com", "duration": "Self-paced"},
+        {"title": "Python Bootcamp", "provider": "Udemy", "type": "paid", "url": "https://udemy.com", "duration": "22 hours"},
+    ],
+    "Machine Learning": [
+        {"title": "ML Specialization", "provider": "Coursera (Andrew Ng)", "type": "cert", "url": "https://coursera.org/specializations/machine-learning-introduction", "duration": "3 months"},
+        {"title": "Hands-On ML with Scikit-Learn", "provider": "O'Reilly", "type": "paid", "url": "https://oreilly.com", "duration": "Self-paced"},
+        {"title": "fast.ai", "provider": "fast.ai", "type": "free", "url": "https://fast.ai", "duration": "7 weeks"},
+    ],
+    "Deep Learning": [
+        {"title": "Deep Learning Specialization", "provider": "Coursera (deeplearning.ai)", "type": "cert", "url": "https://coursera.org/specializations/deep-learning", "duration": "5 months"},
+        {"title": "PyTorch Tutorials", "provider": "PyTorch.org", "type": "free", "url": "https://pytorch.org/tutorials", "duration": "Self-paced"},
+    ],
+    "NLP": [
+        {"title": "NLP with Transformers", "provider": "Hugging Face", "type": "free", "url": "https://huggingface.co/learn", "duration": "Self-paced"},
+        {"title": "NLP Specialization", "provider": "Coursera (deeplearning.ai)", "type": "cert", "url": "https://coursera.org/specializations/natural-language-processing", "duration": "4 months"},
+    ],
+    "SQL": [
+        {"title": "SQL for Data Science", "provider": "Coursera (UC Davis)", "type": "free", "url": "https://coursera.org", "duration": "4 weeks"},
+        {"title": "Mode SQL Tutorial", "provider": "Mode Analytics", "type": "free", "url": "https://mode.com/sql-tutorial", "duration": "Self-paced"},
+    ],
+    "Docker": [
+        {"title": "Docker Getting Started", "provider": "Docker Official", "type": "free", "url": "https://docs.docker.com/get-started", "duration": "Self-paced"},
+        {"title": "Docker & Kubernetes", "provider": "Udemy", "type": "paid", "url": "https://udemy.com", "duration": "22 hours"},
+    ],
+    "AWS": [
+        {"title": "AWS Cloud Practitioner", "provider": "AWS Training", "type": "cert", "url": "https://aws.amazon.com/training", "duration": "40 hours"},
+        {"title": "Cloud Computing Fundamentals", "provider": "Coursera", "type": "free", "url": "https://coursera.org", "duration": "5 weeks"},
+    ],
+    "React": [
+        {"title": "React Official Docs", "provider": "React.dev", "type": "free", "url": "https://react.dev/learn", "duration": "Self-paced"},
+        {"title": "The Complete React Developer", "provider": "Udemy", "type": "paid", "url": "https://udemy.com", "duration": "40 hours"},
+    ],
+    "Data Analysis": [
+        {"title": "Data Analysis with Python", "provider": "freeCodeCamp", "type": "cert", "url": "https://freecodecamp.org", "duration": "300 hours"},
+        {"title": "Pandas Documentation", "provider": "pandas-docs", "type": "free", "url": "https://pandas.pydata.org/docs", "duration": "Self-paced"},
+    ],
+    "Statistics": [
+        {"title": "Statistics for Data Science", "provider": "Coursera (Duke)", "type": "free", "url": "https://coursera.org", "duration": "5 months"},
+        {"title": "Khan Academy Statistics", "provider": "Khan Academy", "type": "free", "url": "https://khanacademy.org/math/statistics-probability", "duration": "Self-paced"},
+    ],
+    "JavaScript": [
+        {"title": "JavaScript.info", "provider": "javascript.info", "type": "free", "url": "https://javascript.info", "duration": "Self-paced"},
+        {"title": "The Odin Project", "provider": "theodinproject.com", "type": "free", "url": "https://theodinproject.com", "duration": "Self-paced"},
+    ],
+    "TypeScript": [
+        {"title": "TypeScript Handbook", "provider": "typescriptlang.org", "type": "free", "url": "https://typescriptlang.org/docs", "duration": "Self-paced"},
+    ],
+    "Git": [
+        {"title": "Git Documentation", "provider": "git-scm.com", "type": "free", "url": "https://git-scm.com/doc", "duration": "Self-paced"},
+        {"title": "GitHub Skills", "provider": "GitHub", "type": "free", "url": "https://skills.github.com", "duration": "Self-paced"},
+    ],
+    "Kubernetes": [
+        {"title": "Kubernetes Basics", "provider": "kubernetes.io", "type": "free", "url": "https://kubernetes.io/docs/tutorials/kubernetes-basics", "duration": "Self-paced"},
+        {"title": "CKA Certification Prep", "provider": "KodeKloud", "type": "paid", "url": "https://kodekloud.com", "duration": "30 hours"},
+    ],
+}
+
+# ─── TEXT EXTRACTION ───────────────────────────────────────────────────────────
+def extract_text_from_upload(uploaded_file):
+    """Extract text from PDF, image, DOCX, or plain text files."""
+    fname = uploaded_file.name.lower()
+    content = uploaded_file.read()
+    uploaded_file.seek(0)
+
+    try:
+        if fname.endswith(".txt"):
+            return content.decode("utf-8", errors="ignore")
+
+        elif fname.endswith(".pdf"):
+            try:
+                import fitz  # PyMuPDF
+                doc = fitz.open(stream=content, filetype="pdf")
+                text = ""
+                for page in doc:
+                    text += page.get_text()
+                if text.strip():
+                    return text
+            except ImportError:
+                pass
+            # Fallback: try pypdf
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(BytesIO(content))
+                return "\n".join(page.extract_text() or "" for page in reader.pages)
+            except ImportError:
+                pass
+            return "PDF text extraction requires PyMuPDF or pypdf. Please paste your resume text below."
+
+        elif fname.endswith(".docx"):
+            try:
+                from docx import Document
+                doc = Document(BytesIO(content))
+                return "\n".join(para.text for para in doc.paragraphs)
+            except ImportError:
+                return "DOCX extraction requires python-docx. Please paste your resume text below."
+
+        elif fname.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            try:
+                from PIL import Image
+                import pytesseract
+                img = Image.open(BytesIO(content))
+                return pytesseract.image_to_string(img)
+            except ImportError:
+                return "Image OCR requires Pillow and pytesseract. Please paste your resume text below."
+
+        else:
+            return content.decode("utf-8", errors="ignore")
+    except Exception as e:
+        return f"Error extracting text: {e}"
+
+
+# ─── SKILL EXTRACTION ─────────────────────────────────────────────────────────
+def extract_skills_from_text(text):
+    """Extract known skills from resume text using keyword matching."""
+    text_lower = text.lower()
+    found = []
+    for skill, keywords in SKILLS_DB.items():
+        if skill.lower() in text_lower:
+            found.append(skill)
+        else:
+            for kw in keywords:
+                if re.search(r'\b' + re.escape(kw.lower()) + r'\b', text_lower):
+                    found.append(skill)
+                    break
+    return list(set(found))
+
+
+def analyze_skill_gap(user_skills, target_role):
+    """Compare user skills to target role requirements."""
+    role = JOB_ROLES.get(target_role, {})
+    required = role.get("required", [])
+    nice = role.get("nice_to_have", [])
+
+    matched_required = [s for s in required if s in user_skills]
+    missing_required = [s for s in required if s not in user_skills]
+    matched_nice = [s for s in nice if s in user_skills]
+    missing_nice = [s for s in nice if s not in user_skills]
+
+    total_required = len(required)
+    score = (len(matched_required) / total_required * 100) if total_required else 0
+
+    return {
+        "matched_required": matched_required,
+        "missing_required": missing_required,
+        "matched_nice": matched_nice,
+        "missing_nice": missing_nice,
+        "match_score": round(score),
+        "role_info": role,
+    }
+
+
+def get_recommendations(missing_skills):
+    """Return training recommendations for missing skills."""
+    recs = []
+    for skill in missing_skills:
+        if skill in TRAINING_RESOURCES:
+            for r in TRAINING_RESOURCES[skill]:
+                recs.append({"skill": skill, **r})
+    return recs
+
+
+# ─── SESSION STATE ─────────────────────────────────────────────────────────────
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "username" not in st.session_state:
+    st.session_state.username = ""
+if "page" not in st.session_state:
+    st.session_state.page = "login"
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
+if "user_skills" not in st.session_state:
+    st.session_state.user_skills = []
+
+
+# ─── AUTH PAGES ───────────────────────────────────────────────────────────────
+def login_page():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div style="text-align:center; padding: 40px 0 20px;">
+            <div style="font-size:3rem;">🎯</div>
+            <h1 class="hero-header">SkillBridge AI</h1>
+            <p class="hero-sub">Identify your skill gaps. Bridge them fast.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        tab1, tab2 = st.tabs(["  🔑  Login  ", "  ✨  Sign Up  "])
+
+        with tab1:
+            st.markdown('<div class="skill-card">', unsafe_allow_html=True)
+            username = st.text_input("Username", key="login_user", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", key="login_pass", placeholder="Enter your password")
+            if st.button("Login →", type="primary", use_container_width=True):
+                if authenticate(username, password):
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.page = "dashboard"
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid credentials. Please try again.")
+            st.markdown("""
+            <p style="text-align:center; color: var(--muted); font-size:0.8rem; margin-top:12px;">
+            Demo: username <code>demo</code> / password <code>demo123</code>
+            </p>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with tab2:
+            st.markdown('<div class="skill-card">', unsafe_allow_html=True)
+            name = st.text_input("Full Name", key="reg_name", placeholder="Jane Doe")
+            email = st.text_input("Email", key="reg_email", placeholder="jane@example.com")
+            new_user = st.text_input("Username", key="reg_user", placeholder="Choose a username")
+            new_pass = st.text_input("Password", type="password", key="reg_pass", placeholder="Choose a strong password")
+            confirm = st.text_input("Confirm Password", type="password", key="reg_confirm", placeholder="Repeat your password")
+            if st.button("Create Account →", type="primary", use_container_width=True):
+                if not all([name, email, new_user, new_pass, confirm]):
+                    st.warning("Please fill in all fields.")
+                elif new_pass != confirm:
+                    st.error("Passwords do not match.")
+                elif len(new_pass) < 6:
+                    st.error("Password must be at least 6 characters.")
+                else:
+                    ok, msg = register_user(new_user, new_pass, email, name)
+                    if ok:
+                        st.success(f"✅ {msg} Please log in.")
+                    else:
+                        st.error(f"❌ {msg}")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # Pre-create demo account
+    users = load_users()
+    if "demo" not in users:
+        register_user("demo", "demo123", "demo@skillbridge.ai", "Demo User")
+
+
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+def render_sidebar():
+    with st.sidebar:
+        st.markdown("""
+        <div style="text-align:center; padding:20px 0 10px;">
+            <div style="font-size:2rem;">🎯</div>
+            <div style="font-family:'Syne',sans-serif; font-size:1.3rem; font-weight:800; color:#6C63FF;">SkillBridge AI</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        users = load_users()
+        user_data = users.get(st.session_state.username, {})
+        name = user_data.get("name", st.session_state.username)
+
+        st.markdown(f"""
+        <div class="skill-card" style="text-align:center; margin:8px 0 20px;">
+            <div style="font-size:2rem;">👤</div>
+            <div style="font-weight:600;">{name}</div>
+            <div style="color:var(--muted); font-size:0.8rem;">@{st.session_state.username}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        pages = {
+            "dashboard": "📊  Dashboard",
+            "analyze": "🔍  Analyze Resume",
+            "jobs": "💼  Job Explorer",
+            "recommendations": "📚  Recommendations",
+            "profile": "👤  My Profile",
+        }
+        for key, label in pages.items():
+            is_active = st.session_state.page == key
+            style = "background:rgba(108,99,255,0.2); border-left:3px solid #6C63FF;" if is_active else ""
+            if st.button(label, key=f"nav_{key}", use_container_width=True):
+                st.session_state.page = key
+                st.rerun()
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        if st.button("🚪  Logout", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.username = ""
+            st.session_state.page = "login"
+            st.session_state.analysis_result = None
+            st.session_state.user_skills = []
+            st.rerun()
+
+
+# ─── DASHBOARD ────────────────────────────────────────────────────────────────
+def dashboard_page():
+    users = load_users()
+    user_data = users.get(st.session_state.username, {})
+    name = user_data.get("name", "Friend")
+
+    st.markdown(f"""
+    <div style="padding:10px 0 30px;">
+        <h1 class="hero-header">Welcome back, {name.split()[0]}! 👋</h1>
+        <p class="hero-sub">Here's your career intelligence overview</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Stats row
+    user_skills = st.session_state.user_skills
+    skill_count = len(user_skills)
+    result = st.session_state.analysis_result
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-number">{skill_count}</div>
+            <div class="stat-label">Skills Detected</div>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        score = result["match_score"] if result else 0
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-number">{score}%</div>
+            <div class="stat-label">Role Match Score</div>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        gaps = len(result["missing_required"]) if result else 0
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-number">{gaps}</div>
+            <div class="stat-label">Critical Gaps</div>
+        </div>""", unsafe_allow_html=True)
+    with c4:
+        recs = len(get_recommendations(result["missing_required"])) if result else 0
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-number">{recs}</div>
+            <div class="stat-label">Learning Resources</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # Quick action
+    if not result:
+        st.markdown("""
+        <div class="gap-card" style="text-align:center; padding:40px;">
+            <div style="font-size:3rem;">🚀</div>
+            <h3 style="margin:12px 0 8px;">Start Your Analysis</h3>
+            <p style="color:var(--muted);">Upload your resume to get personalized skill gap insights and learning recommendations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔍  Analyze My Resume", type="primary"):
+            st.session_state.page = "analyze"
+            st.rerun()
+    else:
+        col1, col2 = st.columns([1.2, 1])
+        with col1:
+            st.markdown('<div class="section-title">🎯 Skill Match Overview</div>', unsafe_allow_html=True)
+            role_name = list(JOB_ROLES.keys())[0]
+            for rn, rd in JOB_ROLES.items():
+                if set(rd["required"]) == set(result.get("matched_required", []) + result.get("missing_required", [])):
+                    role_name = rn
+                    break
+
+            score = result["match_score"]
+            color = "#43E97B" if score >= 70 else "#FFD93D" if score >= 40 else "#FF6584"
+            st.markdown(f"""
+            <div class="skill-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-weight:600;">Overall Match Score</span>
+                    <span style="font-size:1.5rem; font-weight:700; color:{color};">{score}%</span>
+                </div>
+                <div class="prog-bar-wrap">
+                    <div class="prog-bar-fill" style="width:{score}%; background:linear-gradient(90deg, #6C63FF, {color});"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown('<div class="section-title">✅ Skills You Have</div>', unsafe_allow_html=True)
+            tags = "".join([f'<span class="skill-tag tag-have">{s}</span>' for s in result["matched_required"]])
+            st.markdown(f'<div class="skill-card">{tags if tags else "<span style=color:var(--muted)>No matched required skills yet</span>"}</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="section-title">❌ Skills to Acquire</div>', unsafe_allow_html=True)
+            tags2 = "".join([f'<span class="skill-tag tag-missing">{s}</span>' for s in result["missing_required"]])
+            st.markdown(f'<div class="gap-card">{tags2 if tags2 else "<span style=color:var(--muted)>No critical gaps!</span>"}</div>', unsafe_allow_html=True)
+
+        with col2:
+            st.markdown('<div class="section-title">📚 Top Recommendations</div>', unsafe_allow_html=True)
+            recs = get_recommendations(result["missing_required"])[:5]
+            if recs:
+                for r in recs:
+                    btype = "badge-free" if r["type"] == "free" else ("badge-cert" if r["type"] == "cert" else "badge-paid")
+                    btext = {"free": "Free", "cert": "Certification", "paid": "Paid"}[r["type"]]
+                    st.markdown(f"""
+                    <div class="rec-card">
+                        <div class="rec-title">{r['title']}</div>
+                        <div class="rec-meta">📌 {r['skill']} · {r['provider']} · ⏱ {r['duration']}</div>
+                        <span class="rec-badge {btype}">{btext}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="skill-card" style="color:var(--muted); text-align:center; padding:30px;">No gaps found — great job! 🎉</div>', unsafe_allow_html=True)
+
+
+# ─── ANALYZE PAGE ─────────────────────────────────────────────────────────────
+def analyze_page():
+    st.markdown('<h1 class="hero-header">🔍 Resume Analyzer</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Upload your resume or paste text to identify skill gaps</p><br>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns([1.1, 1])
+
+    with col1:
+        st.markdown('<div class="section-title">📄 Upload Resume</div>', unsafe_allow_html=True)
+        uploaded = st.file_uploader(
+            "Supports PDF, DOCX, PNG, JPG, TXT",
+            type=["pdf", "docx", "txt", "png", "jpg", "jpeg"],
+            label_visibility="collapsed"
+        )
+
+        resume_text = ""
+        if uploaded:
+            with st.spinner("📖 Extracting text from your resume..."):
+                resume_text = extract_text_from_upload(uploaded)
+            if resume_text and not resume_text.startswith("Error"):
+                st.success(f"✅ Extracted {len(resume_text.split())} words from your resume")
+                with st.expander("📃 View extracted text"):
+                    st.text_area("", resume_text, height=200, label_visibility="collapsed")
+
+        st.markdown('<div class="section-title">✏️ Or Paste Resume Text</div>', unsafe_allow_html=True)
+        manual_text = st.text_area(
+            "Paste your resume here",
+            placeholder="Paste your resume content here...\n\nExample:\nJohn Doe | john@email.com\nExperience: 3 years Python development, Machine Learning projects using TensorFlow and scikit-learn, SQL database management, Docker containerization...",
+            height=200,
+            label_visibility="collapsed"
+        )
+
+        final_text = resume_text if resume_text and not resume_text.startswith("Error") else manual_text
+
+    with col2:
+        st.markdown('<div class="section-title">🎯 Select Target Role</div>', unsafe_allow_html=True)
+        target_role = st.selectbox(
+            "Target Role",
+            list(JOB_ROLES.keys()),
+            label_visibility="collapsed"
+        )
+
+        role = JOB_ROLES[target_role]
+        st.markdown(f"""
+        <div class="match-card">
+            <div style="font-weight:600; font-size:1rem;">{target_role}</div>
+            <div style="color:var(--muted); font-size:0.85rem; margin:6px 0;">{role['description']}</div>
+            <div style="margin-top:10px; font-size:0.82rem;">
+                💰 <strong>{role['avg_salary']}</strong> &nbsp;|&nbsp; 📈 Demand: <strong>{role['demand']}</strong>
+            </div>
+            <div style="margin-top:10px; font-size:0.82rem; color:var(--muted);">Required skills:</div>
+            <div>{''.join([f'<span class="skill-tag tag-neutral">{s}</span>' for s in role["required"]])}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown('<div class="section-title">🧠 Additional Skills</div>', unsafe_allow_html=True)
+        extra = st.multiselect(
+            "Add any extra skills",
+            list(SKILLS_DB.keys()),
+            label_visibility="collapsed",
+            placeholder="Select additional skills..."
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("⚡  Analyze Skill Gaps", type="primary", use_container_width=True):
+        if not final_text and not extra:
+            st.warning("⚠️ Please provide resume text or select skills to analyze.")
+        else:
+            with st.spinner("🤖 Analyzing your skills..."):
+                time.sleep(1.2)  # Simulate processing
+                detected = extract_skills_from_text(final_text) if final_text else []
+                all_skills = list(set(detected + extra))
+                result = analyze_skill_gap(all_skills, target_role)
+
+                st.session_state.user_skills = all_skills
+                st.session_state.analysis_result = result
+
+            st.success("✅ Analysis complete!")
+            st.rerun()
+
+    # Show results if available
+    if st.session_state.analysis_result:
+        result = st.session_state.analysis_result
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📊 Analysis Results</div>', unsafe_allow_html=True)
+
+        score = result["match_score"]
+        color = "#43E97B" if score >= 70 else "#FFD93D" if score >= 40 else "#FF6584"
+        msg = "Excellent match! 🎉" if score >= 70 else "Good foundation, keep going! 💪" if score >= 40 else "Great starting point! 🚀"
+
+        st.markdown(f"""
+        <div class="skill-card" style="text-align:center; padding:30px 0;">
+            <div style="font-family:'Syne',sans-serif; font-size:4rem; font-weight:800; color:{color};">{score}%</div>
+            <div style="font-size:1.2rem; font-weight:600; margin-top:4px;">{msg}</div>
+            <div class="prog-bar-wrap" style="max-width:400px; margin:20px auto 0;">
+                <div class="prog-bar-fill" style="width:{score}%; background:linear-gradient(90deg,#6C63FF,{color});"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"""<div class="match-card">
+                <div style="font-weight:700; margin-bottom:8px;">✅ Matched Required ({len(result['matched_required'])})</div>
+                {''.join([f'<span class="skill-tag tag-have">{s}</span>' for s in result['matched_required']]) or "<span style='color:var(--muted)'>None yet</span>"}
+            </div>""", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"""<div class="gap-card">
+                <div style="font-weight:700; margin-bottom:8px;">❌ Missing Required ({len(result['missing_required'])})</div>
+                {''.join([f'<span class="skill-tag tag-missing">{s}</span>' for s in result['missing_required']]) or "<span style='color:var(--muted)'>None! Perfect ✨</span>"}
+            </div>""", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"""<div class="skill-card">
+                <div style="font-weight:700; margin-bottom:8px;">⭐ Nice-to-Have ({len(result['matched_nice'])})</div>
+                {''.join([f'<span class="skill-tag tag-neutral">{s}</span>' for s in result['matched_nice']]) or "<span style='color:var(--muted)'>None yet</span>"}
+            </div>""", unsafe_allow_html=True)
+
+        if st.button("📚 View Learning Recommendations →", type="primary"):
+            st.session_state.page = "recommendations"
+            st.rerun()
+
+
+# ─── JOB EXPLORER ─────────────────────────────────────────────────────────────
+def jobs_page():
+    st.markdown('<h1 class="hero-header">💼 Job Explorer</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Explore in-demand roles and see how you match up</p><br>', unsafe_allow_html=True)
+
+    user_skills = set(st.session_state.user_skills)
+
+    for role_name, role in JOB_ROLES.items():
+        required = set(role["required"])
+        matched = required & user_skills
+        score = round(len(matched) / len(required) * 100) if required else 0
+        color = "#43E97B" if score >= 70 else "#FFD93D" if score >= 40 else "#FF6584"
+
+        with st.expander(f"{role_name}  —  {score}% match", expanded=False):
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.markdown(f"""
+                <p style="color:var(--muted);">{role['description']}</p>
+                <div style="margin-top:10px;">
+                    <strong>Required Skills:</strong><br>
+                    {''.join([f'<span class="skill-tag {"tag-have" if s in user_skills else "tag-missing"}">{s}</span>' for s in role["required"]])}
+                </div>
+                <div style="margin-top:10px;">
+                    <strong>Nice to Have:</strong><br>
+                    {''.join([f'<span class="skill-tag {"tag-have" if s in user_skills else "tag-neutral"}">{s}</span>' for s in role["nice_to_have"]])}
+                </div>
+                """, unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""
+                <div class="stat-box">
+                    <div class="stat-number" style="color:{color};">{score}%</div>
+                    <div class="stat-label">Your Match</div>
+                </div>
+                <div style="margin-top:12px; color:var(--muted); font-size:0.85rem;">
+                    💰 {role['avg_salary']}<br>
+                    📈 Demand: {role['demand']}
+                </div>
+                """, unsafe_allow_html=True)
+
+            if st.button(f"Analyze gaps for {role_name}", key=f"analyze_{role_name}"):
+                result = analyze_skill_gap(list(user_skills), role_name)
+                st.session_state.analysis_result = result
+                st.session_state.page = "recommendations"
+                st.rerun()
+
+
+# ─── RECOMMENDATIONS ──────────────────────────────────────────────────────────
+def recommendations_page():
+    st.markdown('<h1 class="hero-header">📚 Learning Recommendations</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Curated resources to close your skill gaps</p><br>', unsafe_allow_html=True)
+
+    result = st.session_state.analysis_result
+    if not result:
+        st.markdown("""
+        <div class="gap-card" style="text-align:center; padding:40px;">
+            <div style="font-size:3rem;">🔍</div>
+            <h3>No Analysis Yet</h3>
+            <p style="color:var(--muted);">Please analyze your resume first to get personalized recommendations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("Analyze Resume →", type="primary"):
+            st.session_state.page = "analyze"
+            st.rerun()
+        return
+
+    missing = result["missing_required"] + result["missing_nice"]
+    recs = get_recommendations(missing)
+
+    if not recs:
+        st.markdown("""
+        <div class="match-card" style="text-align:center; padding:40px;">
+            <div style="font-size:3rem;">🎉</div>
+            <h3>You're all set!</h3>
+            <p style="color:var(--muted);">No critical skill gaps found for your target role.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    # Filter
+    filter_type = st.selectbox("Filter by type", ["All", "Free", "Certification", "Paid"], label_visibility="collapsed")
+    filter_skill = st.selectbox("Filter by skill", ["All Skills"] + list(set(r["skill"] for r in recs)), label_visibility="collapsed")
+
+    filtered = recs
+    if filter_type != "All":
+        type_map = {"Free": "free", "Certification": "cert", "Paid": "paid"}
+        filtered = [r for r in filtered if r["type"] == type_map[filter_type]]
+    if filter_skill != "All Skills":
+        filtered = [r for r in filtered if r["skill"] == filter_skill]
+
+    st.markdown(f'<div style="color:var(--muted); margin:8px 0 16px;">Showing {len(filtered)} resources</div>', unsafe_allow_html=True)
+
+    # Group by skill
+    from collections import defaultdict
+    by_skill = defaultdict(list)
+    for r in filtered:
+        by_skill[r["skill"]].append(r)
+
+    for skill, skill_recs in by_skill.items():
+        st.markdown(f'<div class="section-title">🎓 {skill}</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        for i, r in enumerate(skill_recs):
+            btype = "badge-free" if r["type"] == "free" else ("badge-cert" if r["type"] == "cert" else "badge-paid")
+            btext = {"free": "🆓 Free", "cert": "🏆 Certification", "paid": "💳 Paid"}[r["type"]]
+            card = f"""
+            <div class="rec-card">
+                <div class="rec-title">{r['title']}</div>
+                <div class="rec-meta">🏫 {r['provider']} · ⏱ {r['duration']}</div>
+                <span class="rec-badge {btype}">{btext}</span>
+                <a href="{r['url']}" target="_blank" style="float:right; color:#6C63FF; text-decoration:none; font-size:0.8rem; margin-top:8px;">Visit →</a>
+            </div>
+            """
+            (c1 if i % 2 == 0 else c2).markdown(card, unsafe_allow_html=True)
+
+
+# ─── PROFILE PAGE ─────────────────────────────────────────────────────────────
+def profile_page():
+    st.markdown('<h1 class="hero-header">👤 My Profile</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Manage your account and view your progress</p><br>', unsafe_allow_html=True)
+
+    users = load_users()
+    user_data = users.get(st.session_state.username, {})
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.markdown(f"""
+        <div class="skill-card" style="text-align:center; padding:30px;">
+            <div style="font-size:4rem; margin-bottom:10px;">👤</div>
+            <div style="font-family:'Syne',sans-serif; font-size:1.5rem; font-weight:800;">{user_data.get('name', 'User')}</div>
+            <div style="color:var(--muted);">@{st.session_state.username}</div>
+            <div style="color:var(--muted); font-size:0.8rem; margin-top:6px;">{user_data.get('email', '')}</div>
+            <div style="margin-top:16px; font-size:0.8rem; color:var(--muted);">Member since {user_data.get('created', '')[:10]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        st.markdown('<div class="section-title">🛠 Your Detected Skills</div>', unsafe_allow_html=True)
+        if st.session_state.user_skills:
+            tags = "".join([f'<span class="skill-tag tag-have">{s}</span>' for s in st.session_state.user_skills])
+            st.markdown(f'<div class="skill-card">{tags}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="skill-card" style="color:var(--muted); text-align:center; padding:30px;">No skills detected yet. Analyze your resume first!</div>', unsafe_allow_html=True)
+
+        if st.session_state.analysis_result:
+            result = st.session_state.analysis_result
+            st.markdown('<div class="section-title">📊 Last Analysis</div>', unsafe_allow_html=True)
+            score = result["match_score"]
+            color = "#43E97B" if score >= 70 else "#FFD93D" if score >= 40 else "#FF6584"
+            st.markdown(f"""
+            <div class="skill-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>Match Score</span>
+                    <span style="font-size:1.5rem; font-weight:700; color:{color};">{score}%</span>
+                </div>
+                <div class="prog-bar-wrap">
+                    <div class="prog-bar-fill" style="width:{score}%; background:linear-gradient(90deg,#6C63FF,{color});"></div>
+                </div>
+                <div style="margin-top:12px; font-size:0.85rem; color:var(--muted);">
+                    Matched: {len(result['matched_required'])} required skills &nbsp;|&nbsp; Missing: {len(result['missing_required'])} required skills
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Manual skill builder
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown('<div class="section-title">➕ Manually Add Skills</div>', unsafe_allow_html=True)
+    extra = st.multiselect(
+        "Select skills to add",
+        [s for s in SKILLS_DB.keys() if s not in st.session_state.user_skills],
+        label_visibility="collapsed",
+        placeholder="Choose skills to add..."
+    )
+    if st.button("Add Skills", type="primary") and extra:
+        st.session_state.user_skills = list(set(st.session_state.user_skills + extra))
+        st.success(f"✅ Added {len(extra)} skill(s)")
+        st.rerun()
+
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
+def main():
+    if not st.session_state.authenticated:
+        login_page()
+    else:
+        render_sidebar()
+        page = st.session_state.page
+        if page == "dashboard":
+            dashboard_page()
+        elif page == "analyze":
+            analyze_page()
+        elif page == "jobs":
+            jobs_page()
+        elif page == "recommendations":
+            recommendations_page()
+        elif page == "profile":
+            profile_page()
+        else:
+            dashboard_page()
+
+
+if __name__ == "__main__":
+    main()
